@@ -6,7 +6,7 @@ import json
 agg_trans = pd.read_csv('agg_trans.csv')
 india_states = json.load(open("assets\\states_india.geojson", "r"))
 id=0
-state_id_map = {}
+state_id_map = {""}
 for feature in india_states["features"]:
     feature['id'] = id
     state_id_map[feature["properties"]["ST_NM"]] = feature['id']
