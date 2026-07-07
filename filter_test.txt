@@ -13,26 +13,18 @@ filter f_DataPower_system_PCC_late_log {
     match("PCC-latency-log" value("MSG"));
 };
 
-parser p_datapower_raw {
-    regexp-parser(
-        regexp("<[0-9]+>(?<PARSED_DATE>[A-Za-z]+ [0-9 ]+[0-9:]+) (?<PARSED_HOST>[0-9.]+): (?<PARSED_MSG>.*)")
-        input("${MSG}")
-    );
-};
-
 destination DataPower_system_PCC_late_log {
     file("/var/log/DataPower/PCC/latency.log"
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${PARSED_DATE} PCC-latency-log/${PARSED_HOST} local1.info ${PARSED_MSG}\n")
+        template("${MSG}\n")
     );
 };
 
 log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
-    parser(p_datapower_raw);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
