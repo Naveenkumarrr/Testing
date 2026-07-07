@@ -13,18 +13,28 @@ filter f_DataPower_system_PCC_late_log {
     match("PCC-latency-log" value("MSG"));
 };
 
+rewrite r_strip_priority {
+    subst(
+        "<[0-9]+>([A-Za-z]+ [0-9 ]+[0-9:]+) (.*)",
+        "$1 $2",
+        value("MSG")
+        type("pcre")
+    );
+};
+
 destination DataPower_system_PCC_late_log {
     file("/var/log/DataPower/PCC/latency.log"
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${MSG}\n")
+        template("${MSG} local1.info /${SOURCEIP}\n")
     );
 };
 
 log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
+    rewrite(r_strip_priority);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
