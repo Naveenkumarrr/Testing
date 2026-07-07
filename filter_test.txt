@@ -1,55 +1,30 @@
 @version: 4.6
 
-#
-# SOURCE
-#
 source DataPower_src {
     network(
         ip("0.0.0.0")
         port(514)
         transport("udp")
-        flags(no-parse)
+        # Remove flags(no-parse) — let syslog-ng parse RFC 3164
     );
 };
 
-#
-# FILTER
-#
 filter f_DataPower_system_PCC_late_log {
     match("PCC-latency-log");
 };
 
-#
-# REGEXP PARSER
-#
-parser p_PCC_latency {
-    regexp-parser(
-        patterns(
-            "^(?<CLIENT_IP>[0-9.]+): <[0-9]+>(?<DATE>[A-Z][a-z]{2}\\s+[ 0-9]{2}\\s+[0-9:]{8})\\s+(?<PROGRAM>\\S+)\\s+(?<MESSAGE>.*)$"
-        )
-    );
-};
-
-#
-# DESTINATION
-#
 destination DataPower_system_PCC_late_log {
-    file(
-        "/var/log/DataPower/PCC/latency.log"
+    file("/var/log/DataPower/PCC/latency.log"
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${DATE} ${PROGRAM}/${CLIENT_IP} ${MESSAGE}\n")
+        template("${DATE} ${HOST} ${FACILITY}.${LEVEL} ${MSGHDR}${MSG}\n")
     );
 };
 
-#
-# LOG PATH
-#
 log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
-    parser(p_PCC_latency);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
