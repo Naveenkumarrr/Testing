@@ -22,6 +22,15 @@ rewrite r_strip_priority {
     );
 };
 
+rewrite r_insert_ip {
+    subst(
+        "PCC-latency-log ",
+        "PCC-latency-log/${SOURCEIP} local1.info ",
+        value("MSG")
+        type("pcre")
+    );
+};
+
 destination DataPower_system_PCC_late_log {
     file("/var/log/DataPower/PCC/latency.log"
         create_dirs(yes)
@@ -35,6 +44,7 @@ log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
     rewrite(r_strip_priority);
+    rewrite(r_insert_ip);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
