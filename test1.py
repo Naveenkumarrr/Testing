@@ -5,18 +5,12 @@ INPUT_FILE  = "system_conf.xlsx"
 OUTPUT_FILE = "syslog-ng.conf"
 
 def sanitize_name(value: str) -> str:
-    """Convert a string to a safe syslog-ng identifier (no hyphens, spaces, dots)."""
     return (str(value).strip()
             .replace(" ", "").replace("-", "")
             .replace(".", "").replace("/", "")
             .replace("(", "").replace(")", ""))
 
 def make_unique(base: str, seen: dict) -> str:
-    """
-    Return a unique identifier.
-    If 'base' was seen before, append _2, _3, ... until unique.
-    Records the result in 'seen'.
-    """
     if base not in seen:
         seen[base] = 1
         return base
@@ -24,7 +18,6 @@ def make_unique(base: str, seen: dict) -> str:
     return f"{base}_{seen[base]}"
 
 def generate():
-    # ── Load Excel ──────────────────────────────────────────────────────────
     try:
         df = pd.read_excel(INPUT_FILE, engine="openpyxl")
     except FileNotFoundError:
@@ -53,7 +46,6 @@ def generate():
         val = row.get(col, "")
         return "" if pd.isna(val) else str(val).strip()
 
-    # ── Duplicate-name trackers ──────────────────────────────────────────────
     seen_filter_bases = {}
     seen_dest_bases   = {}
     seen_dest_paths   = {}
@@ -66,25 +58,18 @@ def generate():
         domain         = get(row, "domain")
         target_name    = get(row, "target-name")
         log_path       = get(row, "log server path")
-        facility       = get(row, "facility")
+        facility       = get(row, "facility") or "local1.info"  # fallback if empty
         remote_addr    = get(row, "remote-address")
         remote_port    = get(row, "remote-port")
         local_ident    = get(row, "local-ident")
         appliance_name = get(row, "appliance-name")
         appliance_ip   = get(row, "appliance-ip")
 
-        # ── Unique filter name ───────────────────────────────────────────────
         filter_base = "f_" + (sanitize_name(local_ident) if local_ident else f"row{i}")
         filter_name = make_unique(filter_base, seen_filter_bases)
 
-        # ── Filter condition ─────────────────────────────────────────────────
-        # Now that syslog-parser() is used in the log path, $PROGRAM is
-        # properly populated from the embedded syslog header, so we use
-        # program() which is exact and efficient.
-        if local_ident:
-            filter_expr = f'program("{local_ident}")'
-        else:
-            filter_expr = 'program(".")'
+        rewrite_strip_name  = f"r_strip_priority_{filter_name}"
+        rewrite_insert_name = f"r_insert_ip_{filter_name}"
 
         comment = (
             f"# Domain    : {domain}\n"
@@ -95,14 +80,36 @@ def generate():
             f"# Ident     : {local_ident}\n"
         )
 
+        if local_ident:
+            filter_expr = f'match("{local_ident}" value("MSG"))'
+        else:
+            filter_expr = 'match("." value("MSG"))'
+
         filter_blocks.append(
             f"{comment}"
             f"filter {filter_name} {{\n"
             f"    {filter_expr};\n"
             f"}};\n"
+            f"\n"
+            f"rewrite {rewrite_strip_name} {{\n"
+            f"    subst(\n"
+            f'        "^<[0-9]+>",\n'
+            f'        "",\n'
+            f'        value("MSG")\n'
+            f'        type("pcre")\n'
+            f"    );\n"
+            f"}};\n"
+            f"\n"
+            f"rewrite {rewrite_insert_name} {{\n"
+            f"    subst(\n"
+            f'        "{local_ident} ",\n'
+            f'        "{local_ident}/${{SOURCEIP}} {facility} ",\n'
+            f'        value("MSG")\n'
+            f'        type("pcre")\n'
+            f"    );\n"
+            f"}};\n"
         )
 
-        # ── Destination (reuse if same path) ─────────────────────────────────
         if log_path:
             if log_path in seen_dest_paths:
                 dest_name = seen_dest_paths[log_path]
@@ -115,15 +122,10 @@ def generate():
                     f"destination {dest_name} {{\n"
                     f"    file(\n"
                     f'        "{log_path}"\n'
-                    f"        create-dirs(yes)\n"
+                    f"        create_dirs(yes)\n"
                     f"        perm(0644)\n"
-                    f"        dir-perm(0755)\n"
-                    # $MSGDATE : timestamp embedded in the DataPower message itself
-                    # $SOURCEIP: actual UDP sender IP (172.23.39.159), always set
-                    #            regardless of what the syslog HOST field says
-                    # $PROGRAM : program/ident parsed from the syslog header
-                    # $MSG     : the message body only (no duplicate timestamp)
-                    f'        template("$MSGDATE $SOURCEIP $PROGRAM: $MSG\\n")\n'
+                    f"        dir_perm(0755)\n"
+                    f'        template("${{MSG}}\\n")\n'
                     f"    );\n"
                     f"}};\n"
                 )
@@ -137,13 +139,12 @@ def generate():
                 f"}};\n"
             )
 
-        # syslog-parser() runs BEFORE the filter so $PROGRAM is populated
         log_statements.append(
-            f"log {{ source(s_datapower); parser(p_syslog); "
-            f"filter({filter_name}); destination({dest_name}); flags(final); }};"
+            f"log {{ source(s_datapower); filter({filter_name}); "
+            f"rewrite({rewrite_strip_name}); rewrite({rewrite_insert_name}); "
+            f"destination({dest_name}); flags(final); }};"
         )
 
-    # ── Write output file ────────────────────────────────────────────────────
     with open(OUTPUT_FILE, "w") as f:
 
         f.write("""\
@@ -154,23 +155,12 @@ def generate():
 # syslog-ng configuration – auto-generated by generate_syslog_ng.py
 # Platform : SUSE Linux Enterprise 15.x  (syslog-ng 4.6)
 # Source   : system_conf.xlsx
-#
-# Log line format (no duplicate timestamp):
-#   $MSGDATE $SOURCEIP $PROGRAM: $MSG
-#   Jul 03 05:57:29 172.23.39.159 OWG_CUST_READ_IR1-dpApplicationLog: Info|...
-#
-# How it works:
-#   - Source keeps flags(no-parse) so the raw UDP payload is untouched.
-#   - p_syslog (syslog-parser) runs inside each log{} path to split the
-#     embedded BSD syslog header into $MSGDATE, $HOST, $PROGRAM, $MSG.
-#   - $SOURCEIP always holds the real UDP sender IP, independent of the
-#     parsed $HOST field, so we use that for the server address.
-#   - Filters use program() which matches against the parsed $PROGRAM field.
+# NOTE     : Source uses flags(no-parse) -> filters match on raw MSG text.
+#            Two rewrites per entry:
+#              1. r_strip_priority_* : removes <NNN> syslog priority prefix
+#              2. r_insert_ip_*      : inserts SOURCEIP and facility after ident
 # =============================================================================
 
-# ---------------------------------------------------------------------------
-# Global options
-# ---------------------------------------------------------------------------
 options {
     flush_lines(0);
     time_reopen(10);
@@ -182,9 +172,6 @@ options {
     keep_hostname(yes);
 };
 
-# ---------------------------------------------------------------------------
-# Source: DataPower UDP listener (shared by all domains)
-# ---------------------------------------------------------------------------
 source s_datapower {
     network(
         ip("0.0.0.0")
@@ -195,15 +182,7 @@ source s_datapower {
 };
 
 # ---------------------------------------------------------------------------
-# Parser: splits the embedded BSD syslog header so $PROGRAM / $MSGDATE / $MSG
-# are populated. store-raw-message keeps the original in $RAWMSG if needed.
-# ---------------------------------------------------------------------------
-parser p_syslog {
-    syslog-parser(flags(store-raw-message));
-};
-
-# ---------------------------------------------------------------------------
-# Filters (one per row – names de-duplicated with _2, _3 suffix if needed)
+# Filters and Rewrites (one set per row)
 # ---------------------------------------------------------------------------
 """)
 
@@ -220,7 +199,7 @@ parser p_syslog {
 
         f.write("""\
 # ---------------------------------------------------------------------------
-# Log routing  (parser runs first, then filter, then destination)
+# Log routing
 # ---------------------------------------------------------------------------
 """)
         for stmt in log_statements:
