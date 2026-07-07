@@ -15,8 +15,8 @@ filter f_DataPower_system_PCC_late_log {
 
 rewrite r_strip_priority {
     subst(
-        "^<[0-9]+>",
-        "",
+        "^<[0-9]+>([A-Za-z]+ +[0-9]+ [0-9:]+) PCC-latency-log ",
+        "$1 ",
         value("MSG")
         type("pcre")
     );
@@ -27,7 +27,7 @@ destination DataPower_system_PCC_late_log {
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${MSG} --- SOURCEIP=[${SOURCEIP}] SENDER=[${SENDER}]\n")
+        template("$(substr "${MSG}" 0 15) PCC-latency-log/${SOURCEIP} local1.info $(substr "${MSG}" 16)\n")
     );
 };
 
