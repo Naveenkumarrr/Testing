@@ -1,4 +1,3 @@
-cat > /etc/syslog-ng/syslog-ng.conf << 'EOF'
 @version: 4.6
 
 source DataPower_src {
@@ -25,10 +24,10 @@ rewrite r_strip_priority {
 
 rewrite r_insert_ip {
     subst(
-        "PCC-latency-log \[",
-        "PCC-latency-log/${SOURCEIP} local1.info [",
+        "PCC-latency-log ",
+        "PCC-latency-log/${SOURCEIP} local1.info ",
         value("MSG")
-        type("pcre")
+        type("string")
     );
 };
 
@@ -49,4 +48,3 @@ log {
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
-EOF
