@@ -15,8 +15,8 @@ filter f_DataPower_system_PCC_late_log {
 
 rewrite r_strip_priority {
     subst(
-        "<[0-9]+>([A-Za-z]+ [0-9 ]+[0-9:]+) (.*)",
-        "$1 $2",
+        "^<[0-9]+>",
+        "",
         value("MSG")
         type("pcre")
     );
@@ -27,7 +27,7 @@ destination DataPower_system_PCC_late_log {
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${MSG} local1.info /${SOURCEIP}\n")
+        template("${MSG}\n")
     );
 };
 
