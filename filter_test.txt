@@ -15,13 +15,9 @@ filter f_DataPower_system_PCC_late_log {
 
 parser p_datapower_raw {
     regexp-parser(
-        patterns("<[0-9]+>(?<PARSED_DATE>[A-Za-z]+ [0-9 ]+[0-9:]+) (?<PARSED_HOST>[0-9.]+): (?<PARSED_MSG>.*)")
-        value("MSG")
+        regexp("<[0-9]+>(?<PARSED_DATE>[A-Za-z]+ [0-9 ]+[0-9:]+) (?<PARSED_HOST>[0-9.]+): (?<PARSED_MSG>.*)")
+        input("${MSG}")
     );
-};
-
-rewrite r_set_sourceip {
-    set("${PARSED_HOST}", value("SOURCEIP_CUSTOM"));
 };
 
 destination DataPower_system_PCC_late_log {
@@ -37,7 +33,6 @@ log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
     parser(p_datapower_raw);
-    rewrite(r_set_sourceip);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
