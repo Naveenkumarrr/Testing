@@ -1,3 +1,4 @@
+cat > /etc/syslog-ng/syslog-ng.conf << 'EOF'
 @version: 4.6
 
 source DataPower_src {
@@ -24,15 +25,11 @@ rewrite r_strip_priority {
 
 rewrite r_insert_ip {
     subst(
-        "^((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +[0-9]+ [0-9]{2}:[0-9]{2}:[0-9]{2}) PCC-latency-log",
-        "$1 PCC-latency-log/SOURCEIP_PLACEHOLDER",
+        "PCC-latency-log \[",
+        "PCC-latency-log/${SOURCEIP} local1.info [",
         value("MSG")
         type("pcre")
     );
-};
-
-rewrite r_replace_placeholder {
-    set("$(replace-delimiter "SOURCEIP_PLACEHOLDER" "${SOURCEIP}" "${MSG}")", value("MSG"));
 };
 
 destination DataPower_system_PCC_late_log {
@@ -52,3 +49,4 @@ log {
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
+EOF
