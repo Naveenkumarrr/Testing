@@ -5,12 +5,23 @@ source DataPower_src {
         ip("0.0.0.0")
         port(514)
         transport("udp")
-        # Remove flags(no-parse) — let syslog-ng parse RFC 3164
+        flags(no-parse)
     );
 };
 
 filter f_DataPower_system_PCC_late_log {
-    match("PCC-latency-log");
+    match("PCC-latency-log" value("MSG"));
+};
+
+parser p_datapower_raw {
+    regexp-parser(
+        patterns("<[0-9]+>(?<PARSED_DATE>[A-Za-z]+ [0-9 ]+[0-9:]+) (?<PARSED_HOST>[0-9.]+): (?<PARSED_MSG>.*)")
+        value("MSG")
+    );
+};
+
+rewrite r_set_sourceip {
+    set("${PARSED_HOST}", value("SOURCEIP_CUSTOM"));
 };
 
 destination DataPower_system_PCC_late_log {
@@ -18,13 +29,15 @@ destination DataPower_system_PCC_late_log {
         create_dirs(yes)
         perm(0644)
         dir_perm(0744)
-        template("${DATE} ${HOST} ${FACILITY}.${LEVEL} ${MSGHDR}${MSG}\n")
+        template("${PARSED_DATE} PCC-latency-log/${PARSED_HOST} local1.info ${PARSED_MSG}\n")
     );
 };
 
 log {
     source(DataPower_src);
     filter(f_DataPower_system_PCC_late_log);
+    parser(p_datapower_raw);
+    rewrite(r_set_sourceip);
     destination(DataPower_system_PCC_late_log);
     flags(final);
 };
