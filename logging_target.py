@@ -65,8 +65,13 @@ def discover_logging_targets(shell):
     targets = []
     for line in output.splitlines():
         line = line.strip()
-        # Skip echoed command, prompts, and headers
+        lower = line.lower()
+        # Skip blanks, echoed command, prompts, headers, and login/password noise
         if not line or line.startswith("show") or line.endswith(">") or "#" in line:
+            continue
+        if lower.endswith(":") or "password" in lower or "login" in lower:
+            continue
+        if set(line) == {"*"}:  # masked password echo, e.g. '****'
             continue
         first_token = line.split()[0] if line.split() else ""
         if first_token and first_token.lower() not in ("name", "-----", "logging-target"):
@@ -75,44 +80,31 @@ def discover_logging_targets(shell):
     return targets
 
 
-def interactive_login(shell, username, password, timeout=20):
+def interactive_login(shell, username, password, wait=2.0):
     """
-    Some DataPower boxes show their own CLI-level login/password prompt(s)
-    after the SSH session is already open (on top of SSH auth), and may
-    repeat the login prompt. Instead of assuming a fixed number of prompts,
-    watch the incoming text and answer whatever prompt shows up until we
-    reach a normal command prompt ('>' or '#').
+    DataPower's CLI shows its own login/password prompt over the interactive
+    shell channel (separate from the SSH-level auth done in client.connect()).
+    Confirmed working approach: just send username, wait, then send
+    password, wait - no need to parse/detect the prompt text.
     """
     print("  --- Starting interactive login handshake ---")
-    buffer = ""
-    end_time = time.time() + timeout
-    step = 0
-    while time.time() < end_time:
-        if shell.recv_ready():
-            chunk = shell.recv(65535).decode("utf-8", errors="ignore")
-            buffer += chunk
-            step += 1
-            log(f"login step {step} RECV", chunk)
-            tail = buffer.strip().splitlines()[-1].lower() if buffer.strip() else ""
-            log(f"login step {step} TAIL-LINE", tail)
 
-            if "login" in tail or "username" in tail:
-                print(f"  >>> Detected login/username prompt -> sending username")
-                shell.send(username + "\n")
-                buffer = ""
-            elif "password" in tail:
-                print(f"  >>> Detected password prompt -> sending password")
-                shell.send(password + "\n")
-                buffer = ""
-            elif tail.endswith(">") or tail.endswith("#"):
-                print(f"  >>> Detected command prompt -> login handshake done")
-                return buffer
-        else:
-            time.sleep(0.3)
-    print("  !!! Login handshake TIMED OUT waiting for a command prompt. "
-          "Last buffer contents shown above (RECV) — check for unexpected "
-          "banner text or a prompt format this script doesn't recognize.")
-    return buffer
+    print(f"  >>> SEND (login): {username}")
+    shell.send(username + "\n")
+    time.sleep(wait)
+    if shell.recv_ready():
+        log("login RECV after username", shell.recv(65535).decode("utf-8", errors="ignore"))
+
+    print("  >>> SEND (login): ****** (password)")
+    shell.send(password + "\n")
+    time.sleep(wait)
+    out = ""
+    if shell.recv_ready():
+        out = shell.recv(65535).decode("utf-8", errors="ignore")
+        log("login RECV after password", out)
+
+    print("  --- Login handshake done ---")
+    return out
 
 
 def process_appliance(ip, domain, targets_hint, username, password, port=22):
@@ -133,8 +125,7 @@ def process_appliance(ip, domain, targets_hint, username, password, port=22):
     shell = client.invoke_shell()
     time.sleep(1.5)
     if shell.recv_ready():
-        banner = shell.recv(65535).decode("utf-8", errors="ignore")
-        log("initial banner", banner)
+        log("initial banner", shell.recv(65535).decode("utf-8", errors="ignore"))
 
     print("  --- Step 3: CLI-level login handshake ---")
     interactive_login(shell, username, password)
